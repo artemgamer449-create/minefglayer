@@ -151,7 +151,7 @@
             cursor: pointer;
             font-weight: 500;
             color: white;
-            transition: opacity 0.2s;
+            transition: opacity 0.2s, background-color 0.2s;
         }
 
         button:hover { opacity: 0.9; }
@@ -159,6 +159,7 @@
         .btn-start { background-color: var(--success); }
         .btn-stop { background-color: var(--danger); }
         .btn-restart { background-color: var(--warning); }
+        .btn-secondary { background-color: var(--border-color); }
 
         /* Логи */
         .logs-container {
@@ -174,6 +175,12 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 10px;
+        }
+
+        .logs-actions {
+            display: flex;
+            align-items: center;
+            gap: 15px;
         }
 
         .logs-output {
@@ -197,6 +204,7 @@
             align-items: center;
             gap: 6px;
             cursor: pointer;
+            user-select: none;
         }
 
         .no-bot-selected {
@@ -206,6 +214,57 @@
             align-items: center;
             color: var(--text-muted);
             font-size: 1.2rem;
+        }
+
+        /* Модальное окно */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            padding: 25px;
+            border-radius: 12px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+
+        .modal h3 {
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+        }
+
+        .modal input {
+            width: 100%;
+            padding: 10px 12px;
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 1rem;
+            outline: none;
+        }
+
+        .modal input:focus {
+            border-color: var(--primary);
+        }
+
+        .modal-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
         }
     </style>
 </head>
@@ -217,7 +276,7 @@
             <span>Мои боты</span>
         </div>
         <div class="bots-list" id="botsList">
-            <!-- Список ботов будет рендериться динамически -->
+            <!-- Список ботов рендерится динамически -->
         </div>
         <button class="add-bot-btn" onclick="openAddBotModal()">+ Добавить бота</button>
     </aside>
@@ -241,26 +300,41 @@
             <div class="logs-container">
                 <div class="logs-header">
                     <span>Логи работы</span>
-                    <label class="auto-scroll-label">
-                        <input type="checkbox" id="autoScroll" checked> Автопрокрутка
-                    </label>
+                    <div class="logs-actions">
+                        <button class="btn-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="clearLogs()">Очистить логи</button>
+                        <label class="auto-scroll-label">
+                            <input type="checkbox" id="autoScroll" checked> Автопрокрутка
+                        </label>
+                    </div>
                 </div>
                 <div class="logs-output" id="logsOutput"></div>
             </div>
         </div>
     </main>
 
+    <!-- Модальное окно добавления бота -->
+    <div class="modal-overlay" id="addBotModal">
+        <div class="modal">
+            <h3>Добавить нового бота</h3>
+            <input type="text" id="botNameInput" placeholder="Название бота или путь к скрипту...">
+            <div class="modal-buttons">
+                <button class="btn-secondary" onclick="closeAddBotModal()">Отмена</button>
+                <button class="btn-start" onclick="submitAddBot()">Добавить</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let bots = [];
         let currentBotId = null;
-        let logsCache = {}; // Хранение логов для каждого бота
+        let logsCache = {};
 
-        // Исправление для WebSocket (поддержка WSS на Render / HTTPS и WS для локалки)
+        // Подключение по WebSocket (автоопределение wss/ws)
         const protocol = location.protocol === 'https:' ? 'wss://' : 'ws://';
         const ws = new WebSocket(`${protocol}${location.host}`);
 
         ws.onopen = () => {
-            console.log('WebSocket соединен');
+            console.log('WebSocket соединение установлено');
             fetchBots();
         };
 
@@ -283,13 +357,18 @@
             }
         };
 
+        ws.onclose = () => {
+            console.warn('WebSocket соединение разорвано');
+        };
+
         async function fetchBots() {
             try {
                 const response = await fetch('/api/processes');
+                if (!response.ok) throw new Error('Ошибка загрузки процессов');
                 bots = await response.json();
                 renderBotsList();
                 
-                // Если боты есть, а текущий не выбран — выберем первого
+                // Если боты есть, а текущий не выбран — автоматически выбираем первого
                 if (bots.length > 0 && !currentBotId) {
                     selectBot(bots[0].id);
                 }
@@ -301,6 +380,11 @@
         function renderBotsList() {
             const listEl = document.getElementById('botsList');
             listEl.innerHTML = '';
+
+            if (bots.length === 0) {
+                listEl.innerHTML = '<div style="color: var(--text-muted); text-align: center; font-size: 0.85rem; padding: 20px;">Нет добавленных ботов</div>';
+                return;
+            }
 
             bots.forEach(bot => {
                 const item = document.createElement('div');
@@ -345,6 +429,12 @@
             }
         }
 
+        function clearLogs() {
+            if (!currentBotId) return;
+            logsCache[currentBotId] = '';
+            renderLogs();
+        }
+
         function updateBotStatusInList(botId, status) {
             const bot = bots.find(b => b.id === botId);
             if (bot) {
@@ -365,27 +455,52 @@
                 }
             } catch (e) {
                 console.error('Ошибка запроса управления:', e);
+                alert('Не удалось отправить запрос на сервер');
             }
         }
 
         function openAddBotModal() {
-            const botName = prompt('Введите название нового бота или путь к нему:');
-            if (!botName) return;
-
-            fetch('/api/bots', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: botName })
-            })
-            .then(res => res.json())
-            .then(data => {
-                fetchBots();
-            })
-            .catch(err => console.error('Ошибка добавления бота:', err));
+            document.getElementById('botNameInput').value = '';
+            document.getElementById('addBotModal').style.display = 'flex';
+            document.getElementById('botNameInput').focus();
         }
 
+        function closeAddBotModal() {
+            document.getElementById('addBotModal').style.display = 'none';
+        }
+
+        async function submitAddBot() {
+            const botName = document.getElementById('botNameInput').value.trim();
+            if (!botName) return;
+
+            try {
+                const response = await fetch('/api/bots', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: botName })
+                });
+
+                if (response.ok) {
+                    closeAddBotModal();
+                    fetchBots();
+                } else {
+                    const data = await response.json();
+                    alert(data.error || 'Не удалось добавить бота');
+                }
+            } catch (err) {
+                console.error('Ошибка добавления бота:', err);
+                alert('Ошибка соединения с сервером');
+            }
+        }
+
+        // Закрытие модального окна по нажатию Enter или Escape
+        document.getElementById('botNameInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') submitAddBot();
+            if (e.key === 'Escape') closeAddBotModal();
+        });
+
         function escapeHtml(str) {
-            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         }
     </script>
 </body>

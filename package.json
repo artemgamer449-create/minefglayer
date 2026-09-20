@@ -1,0 +1,16 @@
+{
+  "name": "minecraft-bot-panel",
+  "version": "1.0.0",
+  "description": "Web control panel for Minecraft bot",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.14.2",
+    "mineflayer": "^4.20.0",
+    "mineflayer-pathfinder": "^2.4.0"
+  }
+}

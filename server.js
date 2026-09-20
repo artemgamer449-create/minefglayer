@@ -5,17 +5,21 @@ const { spawn, exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// ИЗМЕНЕНИЕ ДЛЯ RENDER: используем порт из окружения Render или 10000 по умолчанию
 const PORT = process.env.PORT || 10000;
 const HOST = '0.0.0.0';
 
+// Инициализация клиента Supabase через переменные окружения Render
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
+
 const CONFIG_FILE = path.join(__dirname, 'config.json');
-const BOTS_FILE = path.join(__dirname, 'bots.json');
 
 let bots = {};
 let logBuffer = [];
@@ -34,30 +38,50 @@ let globalConfig = {
 
 let botConfigs = [];
 
-function loadConfig() {
+async function loadConfig() {
     try {
         if (fs.existsSync(CONFIG_FILE)) {
             globalConfig = { ...globalConfig, ...JSON.parse(fs.readFileSync(CONFIG_FILE)) };
         }
-        if (fs.existsSync(BOTS_FILE)) {
-            botConfigs = JSON.parse(fs.readFileSync(BOTS_FILE));
-        } else {
-            botConfigs = [{
-                id: 'bot1',
-                username: 'bot',
-                host: globalConfig.host,
-                port: globalConfig.port,
-                version: globalConfig.version,
-                auth: globalConfig.auth,
-                password: globalConfig.password,
-                autoReconnect: globalConfig.autoReconnect,
-                antiAfk: globalConfig.antiAfk,
-                enabled: true
-            }];
-            saveBots();
-        }
     } catch (e) {
         console.error('Config load error:', e);
+    }
+
+    if (supabase) {
+        try {
+            const { data, error } = await supabase.from('bot').select('*');
+            if (error) {
+                console.error('Supabase load error:', error.message);
+            } else if (data && data.length > 0) {
+                botConfigs = data;
+                console.log(`Loaded ${botConfigs.length} bots from Supabase.`);
+            } else {
+                // Создаем дефолтного бота, если таблица пуста
+                const defaultBot = {
+                    id: 'bot_' + Date.now(),
+                    username: 'bot',
+                    host: globalConfig.host,
+                    port: globalConfig.port,
+                    version: globalConfig.version,
+                    auth: globalConfig.auth,
+                    password: globalConfig.password,
+                    autoReconnect: globalConfig.autoReconnect,
+                    antiAfk: globalConfig.antiAfk,
+                    enabled: true
+                };
+                const { error: insertError } = await supabase.from('bot').insert([defaultBot]);
+                if (insertError) {
+                    console.error('Supabase default bot insert error:', insertError.message);
+                } else {
+                    botConfigs = [defaultBot];
+                    console.log('Created default bot in Supabase.');
+                }
+            }
+        } catch (e) {
+            console.error('Supabase connection error during load:', e.message);
+        }
+    } else {
+        console.warn('WARNING: Supabase credentials are not set!');
     }
 }
 
@@ -65,19 +89,9 @@ function saveConfig() {
     try {
         fs.writeFileSync(CONFIG_FILE, JSON.stringify(globalConfig, null, 2));
     } catch (e) {
-        console.error('Config save error (Read-only filesystem on Render?):', e.message);
+        console.error('Config save error:', e.message);
     }
 }
-
-function saveBots() {
-    try {
-        fs.writeFileSync(BOTS_FILE, JSON.stringify(botConfigs, null, 2));
-    } catch (e) {
-        console.error('Bots save error (Read-only filesystem on Render?):', e.message);
-    }
-}
-
-loadConfig();
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -145,21 +159,32 @@ function startBot(botConfig) {
     return { success: true };
 }
 
-function stopBot(botId) {
+async function stopBot(botId) {
     const bot = bots[botId];
-    if (!bot) return { success: false, msg: 'Bot not running' };
     const cfg = botConfigs.find(b => b.id === botId);
-    if (cfg) { cfg.autoReconnect = false; saveBots(); }
+    if (cfg) {
+        cfg.autoReconnect = false;
+        if (supabase) {
+            await supabase.from('bot').update({ autoReconnect: false }).eq('id', botId);
+        }
+    }
+    if (!bot) return { success: false, msg: 'Bot not running' };
     bot.process.kill('SIGTERM');
     addLog('system', `Stopping bot ${bot.config.username}...`, botId);
     return { success: true };
 }
 
-function restartBot(botId) {
-    stopBot(botId);
-    setTimeout(() => {
+async function restartBot(botId) {
+    await stopBot(botId);
+    setTimeout(async () => {
         const cfg = botConfigs.find(b => b.id === botId);
-        if (cfg) { cfg.autoReconnect = true; saveBots(); startBot(cfg); }
+        if (cfg) {
+            cfg.autoReconnect = true;
+            if (supabase) {
+                await supabase.from('bot').update({ autoReconnect: true }).eq('id', botId);
+            }
+            startBot(cfg);
+        }
     }, 1000);
     return { success: true };
 }
@@ -168,33 +193,26 @@ function startAllBots() {
     botConfigs.filter(b => b.enabled).forEach(startBot);
 }
 
-function stopAllBots() {
-    Object.keys(bots).forEach(stopBot);
+async function stopAllBots() {
+    for (const botId of Object.keys(bots)) {
+        await stopBot(botId);
+    }
 }
 
 function getProcessList() {
     return new Promise((resolve) => {
         const platform = os.platform();
-        let cmd;
-        if (platform === 'win32') {
-            cmd = 'tasklist /FO CSV /NH';
-        } else {
-            cmd = 'ps aux --sort=-%cpu';
-        }
+        let cmd = platform === 'win32' ? 'tasklist /FO CSV /NH' : 'ps aux --sort=-%cpu';
         exec(cmd, { timeout: 5000 }, (err, stdout) => {
             if (err) return resolve(getProcessListFallback());
             const processes = [];
             if (platform === 'win32') {
-                const lines = stdout.trim().split('\n');
-                lines.slice(0, 80).forEach(line => {
+                stdout.trim().split('\n').slice(0, 80).forEach(line => {
                     const match = line.match(/"([^"]*)","(\d+)"/);
-                    if (match) {
-                        processes.push({ pid: parseInt(match[2]), name: match[1], cmd: '', mem: 0, cpu: 0 });
-                    }
+                    if (match) processes.push({ pid: parseInt(match[2]), name: match[1], cmd: '', mem: 0, cpu: 0 });
                 });
             } else {
-                const lines = stdout.trim().split('\n').slice(1);
-                lines.slice(0, 40).forEach(line => {
+                stdout.trim().split('\n').slice(1).slice(0, 40).forEach(line => {
                     const parts = line.trim().split(/\s+/);
                     if (parts.length >= 11) {
                         processes.push({
@@ -285,18 +303,14 @@ function getSystemStats() {
         });
     }
     const cpuUsage = totalTick > 0 ? (100 - (totalIdle / totalTick * 100)) : 0;
-
     const memTotal = os.totalmem();
     const memFree = os.freemem();
     const memUsed = memTotal - memFree;
 
-    const load = os.loadavg();
-    const uptime = os.uptime();
-
     return {
-        cpu: { usage: cpuUsage.toFixed(1), cores: cpus ? cpus.length : 1, model: cpus && cpus[0] ? cpus[0].model : 'Unknown', load },
+        cpu: { usage: cpuUsage.toFixed(1), cores: cpus ? cpus.length : 1, model: cpus && cpus[0] ? cpus[0].model : 'Unknown', load: os.loadavg() },
         memory: { total: memTotal, used: memUsed, free: memFree, usagePercent: memTotal > 0 ? ((memUsed / memTotal) * 100).toFixed(1) : 0 },
-        uptime,
+        uptime: os.uptime(),
         platform: `${os.type()} ${os.release()} (${os.arch()})`,
         hostname: os.hostname(),
         node: process.version
@@ -314,7 +328,7 @@ app.get('/api/status', (req, res) => {
     res.json({ bots: botStatus, configs: botConfigs, globalConfig });
 });
 
-app.post('/api/start', (req, res) => {
+app.post('/api/start', async (req, res) => {
     const { id } = req.body;
     if (id) {
         const cfg = botConfigs.find(b => b.id === id);
@@ -325,16 +339,16 @@ app.post('/api/start', (req, res) => {
     }
 });
 
-app.post('/api/stop', (req, res) => {
+app.post('/api/stop', async (req, res) => {
     const { id } = req.body;
-    if (id) res.json(stopBot(id));
-    else { stopAllBots(); res.json({ success: true }); }
+    if (id) res.json(await stopBot(id));
+    else { await stopAllBots(); res.json({ success: true }); }
 });
 
-app.post('/api/restart', (req, res) => {
+app.post('/api/restart', async (req, res) => {
     const { id } = req.body;
-    if (id) res.json(restartBot(id));
-    else { stopAllBots(); setTimeout(startAllBots, 1000); res.json({ success: true }); }
+    if (id) res.json(await restartBot(id));
+    else { await stopAllBots(); setTimeout(startAllBots, 1000); res.json({ success: true }); }
 });
 
 app.get('/api/logs', (req, res) => {
@@ -351,7 +365,6 @@ app.post('/api/command', (req, res) => {
     res.json({ success: true });
 });
 
-// ИЗМЕНЕНИЕ: Возвращаем расширенный список ботов со статусами для корректного отображения на фронтенде
 app.get('/api/processes', (req, res) => {
     const result = botConfigs.map(cfg => {
         const runningBot = bots[cfg.id];
@@ -371,7 +384,7 @@ app.get('/api/bots', (req, res) => {
     res.json(botConfigs);
 });
 
-app.post('/api/bots', (req, res) => {
+app.post('/api/bots', async (req, res) => {
     const { username, host, port, version, auth, password, autoReconnect, antiAfk } = req.body;
     if (!username) return res.json({ success: false, msg: 'Username required' });
     const id = 'bot_' + Date.now();
@@ -381,21 +394,33 @@ app.post('/api/bots', (req, res) => {
         password: password || globalConfig.password, autoReconnect: autoReconnect !== false,
         antiAfk: antiAfk !== false, enabled: true
     };
+    
     botConfigs.push(newBot);
-    saveBots();
+    
+    if (supabase) {
+        const { error } = await supabase.from('bot').insert([newBot]);
+        if (error) console.error('Supabase insert error:', error.message);
+    }
+
     broadcast({ type: 'botsUpdated', data: botConfigs });
     addLog('system', `Added bot: ${username}`);
     res.json({ success: true, bot: newBot });
 });
 
-app.put('/api/bots/:id', (req, res) => {
+app.put('/api/bots/:id', async (req, res) => {
     const { id } = req.params;
     const idx = botConfigs.findIndex(b => b.id === id);
     if (idx === -1) return res.json({ success: false, msg: 'Bot not found' });
     const updates = req.body;
     delete updates.id;
+    
     botConfigs[idx] = { ...botConfigs[idx], ...updates };
-    saveBots();
+
+    if (supabase) {
+        const { error } = await supabase.from('bot').update(updates).eq('id', id);
+        if (error) console.error('Supabase update error:', error.message);
+    }
+
     broadcast({ type: 'botsUpdated', data: botConfigs });
     if (bots[id] && (updates.host || updates.port || updates.version || updates.username || updates.password || updates.auth)) {
         addLog('system', `Config changed for ${botConfigs[idx].username}, restart to apply`, id);
@@ -403,11 +428,16 @@ app.put('/api/bots/:id', (req, res) => {
     res.json({ success: true, bot: botConfigs[idx] });
 });
 
-app.delete('/api/bots/:id', (req, res) => {
+app.delete('/api/bots/:id', async (req, res) => {
     const { id } = req.params;
-    stopBot(id);
+    await stopBot(id);
     botConfigs = botConfigs.filter(b => b.id !== id);
-    saveBots();
+
+    if (supabase) {
+        const { error } = await supabase.from('bot').delete().eq('id', id);
+        if (error) console.error('Supabase delete error:', error.message);
+    }
+
     broadcast({ type: 'botsUpdated', data: botConfigs });
     addLog('system', `Removed bot: ${id}`);
     res.json({ success: true });
@@ -423,9 +453,7 @@ app.post('/api/config', (req, res) => {
     res.json({ success: true, config: globalConfig });
 });
 
-app.get('/api/system', (req, res) => {
-    res.json(getSystemStats());
-});
+app.get('/api/system', (req, res) => res.json(getSystemStats()));
 
 app.get('/api/disks', async (req, res) => {
     const disks = await getDiskInfo();
@@ -451,6 +479,9 @@ wss.on('connection', ws => {
     ws.on('close', () => {});
 });
 
-server.listen(PORT, HOST, () => {
-    console.log(`Chapman Bot Panel running at http://${HOST}:${PORT}`);
+// Запускаем сервер только после загрузки конфигурации из базы данных
+loadConfig().then(() => {
+    server.listen(PORT, HOST, () => {
+        console.log(`Chapman Bot Panel running at http://${HOST}:${PORT}`);
+    });
 });

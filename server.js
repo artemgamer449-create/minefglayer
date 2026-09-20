@@ -10,8 +10,10 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const PORT = process.env.PORT || 25170;
+// ИЗМЕНЕНИЕ ДЛЯ RENDER: используем порт из окружения Render или 10000 по умолчанию
+const PORT = process.env.PORT || 10000;
 const HOST = '0.0.0.0';
+
 const CONFIG_FILE = path.join(__dirname, 'config.json');
 const BOTS_FILE = path.join(__dirname, 'bots.json');
 
@@ -23,6 +25,7 @@ let globalConfig = {
   host: 'ghjghjghjghjdfg-M3DJ.aternos.me',
   port: 41441,
   version: '1.21.11',
+  username: 'bot',
   auth: 'offline',
   password: 'botpassword',
   autoReconnect: true,
@@ -59,11 +62,19 @@ function loadConfig() {
 }
 
 function saveConfig() {
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(globalConfig, null, 2));
+  try {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(globalConfig, null, 2));
+  } catch (e) {
+    console.error('Config save error (Read-only filesystem on Render?):', e.message);
+  }
 }
 
 function saveBots() {
-  fs.writeFileSync(BOTS_FILE, JSON.stringify(botConfigs, null, 2));
+  try {
+    fs.writeFileSync(BOTS_FILE, JSON.stringify(botConfigs, null, 2));
+  } catch (e) {
+    console.error('Bots save error (Read-only filesystem on Render?):', e.message);
+  }
 }
 
 loadConfig();
@@ -267,11 +278,13 @@ function killProcess(pid) {
 function getSystemStats() {
   const cpus = os.cpus();
   let totalIdle = 0, totalTick = 0;
-  cpus.forEach(cpu => {
-    for (const type in cpu.times) totalTick += cpu.times[type];
-    totalIdle += cpu.times.idle;
-  });
-  const cpuUsage = 100 - (totalIdle / totalTick * 100);
+  if (cpus && cpus.length > 0) {
+    cpus.forEach(cpu => {
+      for (const type in cpu.times) totalTick += cpu.times[type];
+      totalIdle += cpu.times.idle;
+    });
+  }
+  const cpuUsage = totalTick > 0 ? (100 - (totalIdle / totalTick * 100)) : 0;
 
   const memTotal = os.totalmem();
   const memFree = os.freemem();
@@ -281,8 +294,8 @@ function getSystemStats() {
   const uptime = os.uptime();
 
   return {
-    cpu: { usage: cpuUsage.toFixed(1), cores: cpus.length, model: cpus[0].model, load },
-    memory: { total: memTotal, used: memUsed, free: memFree, usagePercent: ((memUsed / memTotal) * 100).toFixed(1) },
+    cpu: { usage: cpuUsage.toFixed(1), cores: cpus ? cpus.length : 1, model: cpus && cpus[0] ? cpus[0].model : 'Unknown', load },
+    memory: { total: memTotal, used: memUsed, free: memFree, usagePercent: memTotal > 0 ? ((memUsed / memTotal) * 100).toFixed(1) : 0 },
     uptime,
     platform: `${os.type()} ${os.release()} (${os.arch()})`,
     hostname: os.hostname(),
@@ -423,11 +436,9 @@ wss.on('connection', ws => {
   botConfigs.forEach(cfg => {
     if (!botStatus[cfg.id]) botStatus[cfg.id] = { running: false, enabled: cfg.enabled, username: cfg.username };
   });
-  ws.send(JSON.stringify({ type: 'init', data: { logs: logBuffer, bots: botStatus, configs: botConfigs, globalConfig } }));
+  ws.send(JSON.stringify({ type: 'init', data: { logs: logBuffer, bots: botStatus, configs: botConfigs, config: globalConfig } }));
   ws.on('close', () => {});
 });
-
-startAllBots();
 
 server.listen(PORT, HOST, () => {
   console.log(`Chapman Bot Panel running at http://${HOST}:${PORT}`);

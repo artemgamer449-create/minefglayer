@@ -10,7 +10,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const PORT = 25170;
+const PORT = process.env.PORT || 25170;
 const HOST = '0.0.0.0';
 const CONFIG_FILE = path.join(__dirname, 'config.json');
 const BOTS_FILE = path.join(__dirname, 'bots.json');
@@ -431,5 +431,4 @@ startAllBots();
 
 server.listen(PORT, HOST, () => {
   console.log(`Chapman Bot Panel running at http://${HOST}:${PORT}`);
-  console.log(`External: http://f1.rustix.me:${PORT}`);
 });

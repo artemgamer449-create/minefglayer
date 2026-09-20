@@ -1,357 +1,392 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chapman Bot Panel</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Consolas', 'Monospace', monospace; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
-    .header { background: #161b22; border-bottom: 1px solid #30363d; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
-    .header h1 { font-size: 1.25rem; font-weight: 600; color: #58a6ff; }
-    .status-badge { padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
-    .status-badge.running { background: #238636; color: #fff; }
-    .status-badge.stopped { background: #da3633; color: #fff; }
-    .container { display: grid; grid-template-columns: 1fr 420px; height: calc(100vh - 60px); }
-    .main { padding: 1.5rem; overflow: hidden; display: flex; flex-direction: column; }
-    .panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 1rem; overflow: hidden; flex: 1; display: flex; flex-direction: column; }
-    .panel-header { background: #21262d; border-bottom: 1px solid #30363d; padding: 0.75rem 1rem; display: flex; justify-content: space-between; align-items: center; }
-    .panel-header h2 { font-size: 0.875rem; font-weight: 600; }
-    .btn { padding: 0.375rem 0.75rem; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-family: inherit; transition: all 0.15s; }
-    .btn:hover { background: #30363d; border-color: #484f58; }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-primary { background: #238636; border-color: #238636; }
-    .btn-primary:hover { background: #2ea043; border-color: #2ea043; }
-    .btn-danger { background: #da3633; border-color: #da3633; }
-    .btn-danger:hover { background: #f85149; border-color: #f85149; }
-    .btn-group { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-    .console { flex: 1; overflow-y: auto; padding: 1rem; font-size: 0.75rem; line-height: 1.6; }
-    .log-entry { padding: 0.125rem 0; border-bottom: 1px solid #1f2428; white-space: pre-wrap; word-break: break-word; }
-    .log-entry:last-child { border-bottom: none; }
-    .log-time { color: #8b949e; margin-right: 0.5rem; }
-    .log-type-system { color: #58a6ff; }
-    .log-type-stdout { color: #7ee787; }
-    .log-type-stderr { color: #f85149; }
-    .log-type-error { color: #f85149; font-weight: bold; }
-    .log-type-input { color: #d2a8ff; }
-    .sidebar { background: #161b22; border-left: 1px solid #30363d; padding: 1.5rem; overflow-y: auto; }
-    .widget { background: #21262d; border: 1px solid #30363d; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
-    .widget h3 { font-size: 0.875rem; font-weight: 600; margin-bottom: 1rem; color: #58a6ff; }
-    .info-row { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid #30363d; font-size: 0.8rem; }
-    .info-row:last-child { border-bottom: none; }
-    .info-label { color: #8b949e; }
-    .info-value { font-family: 'Consolas', monospace; }
-    .command-input { display: flex; gap: 0.5rem; margin-top: 1rem; }
-    .command-input input { flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 0.5rem; color: #c9d1d9; font-family: inherit; font-size: 0.8rem; }
-    .command-input input:focus { outline: none; border-color: #58a6ff; }
-    .tabs { display: flex; gap: 0.25rem; margin-bottom: 1rem; flex-wrap: wrap; }
-    .tab { padding: 0.5rem 1rem; background: transparent; border: 1px solid #30363d; border-radius: 6px 6px 0 0; color: #8b949e; cursor: pointer; font-size: 0.75rem; font-family: inherit; }
-    .tab.active { background: #21262d; color: #c9d1d9; border-bottom-color: #21262d; }
-    .tab-content { display: none; }
-    .tab-content.active { display: block; }
-    .process-list { max-height: 400px; overflow-y: auto; }
-    .process-item { padding: 0.5rem; border-bottom: 1px solid #1f2428; font-size: 0.75rem; display: grid; grid-template-columns: 60px 1fr 60px 70px 60px; gap: 0.5rem; align-items: center; }
-    .process-item.header { background: #21262d; font-weight: 600; color: #8b949e; position: sticky; top: 0; z-index: 1; }
-    .process-item:last-child { border-bottom: none; }
-    .process-name { color: #58a6ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .process-pid { color: #8b949e; text-align: right; }
-    .process-cpu { color: #d2a8ff; text-align: right; }
-    .process-mem { color: #7ee787; text-align: right; }
-    .process-actions { display: flex; gap: 0.25rem; justify-content: flex-end; }
-    .btn-sm { padding: 0.125rem 0.375rem; font-size: 0.65rem; }
-    .config-form { display: flex; flex-direction: column; gap: 0.75rem; }
-    .form-group { display: flex; flex-direction: column; gap: 0.25rem; }
-    .form-group label { font-size: 0.7rem; color: #8b949e; text-transform: uppercase; }
-    .form-group input, .form-group select { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 0.5rem; color: #c9d1d9; font-family: inherit; font-size: 0.8rem; }
-    .form-group input:focus, .form-group select:focus { outline: none; border-color: #58a6ff; }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-    .checkbox-group { display: flex; align-items: center; gap: 0.5rem; }
-    .checkbox-group input[type="checkbox"] { width: 16px; height: 16px; accent-color: #238636; }
-    .connection-status { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; color: #8b949e; }
-    .connection-dot { width: 8px; height: 8px; border-radius: 50%; background: #da3633; }
-    .connection-dot.connected { background: #238636; }
-    @media (max-width: 1100px) {
-      .container { grid-template-columns: 1fr; }
-      .sidebar { border-left: none; border-top: 1px solid #30363d; }
-      .process-item { grid-template-columns: 50px 1fr 50px 60px 50px; font-size: 0.7rem; }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Панель управления ботами</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --border-color: #334155;
+            --text-color: #f8fafc;
+            --text-muted: #94a3b8;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --danger: #ef4444;
+            --danger-hover: #dc2626;
+            --success: #22c55e;
+            --warning: #f59e0b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Сайдбар */
+        aside {
+            width: 280px;
+            background-color: var(--card-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            font-size: 1.25rem;
+            font-weight: bold;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .bots-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+        }
+
+        .bot-item {
+            padding: 12px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 8px;
+            background-color: rgba(255, 255, 255, 0.02);
+            border: 1px solid transparent;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.2s;
+        }
+
+        .bot-item:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .bot-item.active {
+            background-color: rgba(59, 130, 246, 0.15);
+            border-color: var(--primary);
+        }
+
+        .bot-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .bot-name {
+            font-weight: 500;
+        }
+
+        .bot-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-online { background-color: var(--success); }
+        .status-offline { background-color: var(--text-muted); }
+
+        .add-bot-btn {
+            margin: 15px;
+            padding: 10px;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        .add-bot-btn:hover {
+            background-color: var(--primary-hover);
+        }
+
+        /* Основной контент */
+        main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .main-header {
+            padding: 20px 30px;
+            background-color: var(--card-bg);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .bot-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            color: white;
+            transition: opacity 0.2s;
+        }
+
+        button:hover { opacity: 0.9; }
+
+        .btn-start { background-color: var(--success); }
+        .btn-stop { background-color: var(--danger); }
+        .btn-restart { background-color: var(--warning); }
+
+        /* Логи */
+        .logs-container {
+            flex: 1;
+            padding: 20px 30px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .logs-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .logs-output {
+            flex: 1;
+            background-color: #090d16;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 0.9rem;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: #e2e8f0;
+        }
+
+        .auto-scroll-label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+        }
+
+        .no-bot-selected {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: var(--text-muted);
+            font-size: 1.2rem;
+        }
+    </style>
 </head>
 <body>
-  <header class="header">
-    <h1>Chapman Bot Panel</h1>
-    <div class="connection-status">
-      <span class="connection-dot" id="wsStatus"></span>
-      <span id="wsText">Disconnected</span>
-    </div>
-  </header>
-  <div class="container">
-    <main class="main">
-      <div class="panel">
-        <div class="panel-header">
-          <h2>Console</h2>
-          <div class="btn-group">
-            <button class="btn btn-primary" id="btnStart" onclick="sendCmd('start')">Start</button>
-            <button class="btn btn-danger" id="btnStop" onclick="sendCmd('stop')">Stop</button>
-            <button class="btn" id="btnRestart" onclick="sendCmd('restart')">Restart</button>
-            <button class="btn" id="btnReconnect" onclick="sendCmd('reconnect')">Reconnect</button>
-            <button class="btn" id="btnClear" onclick="clearConsole()">Clear</button>
-          </div>
+
+    <!-- Сайдбар с ботами -->
+    <aside>
+        <div class="sidebar-header">
+            <span>Мои боты</span>
         </div>
-        <div class="console" id="console"></div>
-      </div>
-      <div class="panel">
-        <div class="panel-header">
-          <h2>Send Command</h2>
+        <div class="bots-list" id="botsList">
+            <!-- Список ботов будет рендериться динамически -->
         </div>
-        <div class="command-input">
-          <input type="text" id="cmdInput" placeholder="Enter command (e.g. /say hello)" onkeypress="if(event.key==='Enter') sendCommand()">
-          <button class="btn btn-primary" onclick="sendCommand()">Send</button>
-        </div>
-      </div>
-    </main>
-    <aside class="sidebar">
-      <div class="widget">
-        <h3>Bot Status</h3>
-        <div class="info-row"><span class="info-label">Status</span><span class="info-value"><span class="status-badge stopped" id="botStatus">Stopped</span></span></div>
-        <div class="info-row"><span class="info-label">PID</span><span class="info-value" id="botPid">-</span></div>
-        <div class="info-row"><span class="info-label">Username</span><span class="info-value" id="botUsername">-</span></div>
-        <div class="info-row"><span class="info-label">Server</span><span class="info-value" id="botServer">-</span></div>
-        <div class="info-row"><span class="info-label">Version</span><span class="info-value" id="botVersion">-</span></div>
-        <div class="info-row"><span class="info-label">Memory</span><span class="info-value" id="botMem">-</span></div>
-        <div class="info-row"><span class="info-label">CPU</span><span class="info-value" id="botCpu">-</span></div>
-      </div>
-      <div class="widget">
-        <h3>Configuration</h3>
-        <form class="config-form" id="configForm" onsubmit="saveConfig(event)">
-          <div class="form-row">
-            <div class="form-group"><label>Host</label><input type="text" id="cfgHost" required></div>
-            <div class="form-group"><label>Port</label><input type="number" id="cfgPort" required></div>
-          </div>
-          <div class="form-row">
-            <div class="form-group"><label>Version</label><input type="text" id="cfgVersion" required></div>
-            <div class="form-group"><label>Username</label><input type="text" id="cfgUsername" required></div>
-          </div>
-          <div class="form-group"><label>Password</label><input type="password" id="cfgPassword" placeholder="Leave empty to keep current"></div>
-          <div class="form-row">
-            <div class="form-group"><label>Auth</label><select id="cfgAuth"><option value="offline">Offline</option><option value="microsoft">Microsoft</option><option value="mojang">Mojang</option></select></div>
-          </div>
-          <div class="checkbox-group">
-            <input type="checkbox" id="cfgAutoReconnect"><label style="font-size:0.75rem;text-transform:none;">Auto Reconnect</label>
-          </div>
-          <div class="checkbox-group">
-            <input type="checkbox" id="cfgAntiAfk"><label style="font-size:0.75rem;text-transform:none;">Anti-AFK</label>
-          </div>
-          <button type="submit" class="btn btn-primary" style="margin-top:0.5rem;">Save Config</button>
-        </form>
-      </div>
-      <div class="widget">
-        <h3>Task Manager</h3>
-        <div class="tabs">
-          <button class="tab active" onclick="showTab('processes')">Processes</button>
-          <button class="tab" onclick="showTab('system')">System</button>
-        </div>
-        <div id="tab-processes" class="tab-content active">
-          <div class="process-list">
-            <div class="process-item header"><span>PID</span><span>Name</span><span>CPU%</span><span>Memory</span><span>Action</span></div>
-            <div id="processList">Loading...</div>
-          </div>
-        </div>
-        <div id="tab-system" class="tab-content">
-          <div class="info-row"><span class="info-label">Platform</span><span class="info-value" id="sysPlatform">-</span></div>
-          <div class="info-row"><span class="info-label">Node Version</span><span class="info-value" id="sysNode">-</span></div>
-          <div class="info-row"><span class="info-label">CPUs</span><span class="info-value" id="sysCpus">-</span></div>
-          <div class="info-row"><span class="info-label">Total Memory</span><span class="info-value" id="sysMemTotal">-</span></div>
-          <div class="info-row"><span class="info-label">Free Memory</span><span class="info-value" id="sysMemFree">-</span></div>
-          <div class="info-row"><span class="info-label">Hostname</span><span class="info-value" id="sysHostname">-</span></div>
-          <div class="info-row"><span class="info-label">Uptime</span><span class="info-value" id="sysUptime">-</span></div>
-          <div class="info-row"><span class="info-label">Load Avg</span><span class="info-value" id="sysLoad">-</span></div>
-        </div>
-      </div>
+        <button class="add-bot-btn" onclick="openAddBotModal()">+ Добавить бота</button>
     </aside>
-  </div>
-  <script>
-    // Автоматический выбор wss:// для Render и ws:// для локалхоста
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}`);
-    
-    const consoleEl = document.getElementById('console');
-    let autoScroll = true;
-    let currentConfig = {};
 
-    ws.onopen = () => {
-      document.getElementById('wsStatus').classList.add('connected');
-      document.getElementById('wsText').textContent = 'Connected';
-    };
-    ws.onclose = () => {
-      document.getElementById('wsStatus').classList.remove('connected');
-      document.getElementById('wsText').textContent = 'Disconnected';
-      setTimeout(() => location.reload(), 3000);
-    };
-    ws.onmessage = e => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === 'init') {
-        msg.data.logs.forEach(addLog);
-        updateStatus(msg.data.running);
-        if (msg.data.config) {
-          currentConfig = msg.data.config;
-          fillConfigForm(msg.data.config);
-          updateBotInfo(msg.data.config);
-        }
-      } else if (msg.type === 'log') {
-        addLog(msg.data);
-      } else if (msg.type === 'status') {
-        updateStatus(msg.data.running);
-      } else if (msg.type === 'config') {
-        currentConfig = msg.data;
-        fillConfigForm(msg.data);
-        updateBotInfo(msg.data);
-      }
-    };
+    <!-- Основная рабочая зона -->
+    <main id="mainArea">
+        <div class="no-bot-selected" id="noBotSelected">
+            Выберите бота из списка слева
+        </div>
 
-    function addLog(entry) {
-      const div = document.createElement('div');
-      div.className = `log-entry log-type-${entry.type}`;
-      div.innerHTML = `<span class="log-time">[${new Date(entry.time).toLocaleTimeString()}]</span>${escapeHtml(entry.message)}`;
-      consoleEl.appendChild(div);
-      if (autoScroll) consoleEl.scrollTop = consoleEl.scrollHeight;
-    }
-
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    function updateStatus(running) {
-      const badge = document.getElementById('botStatus');
-      badge.textContent = running ? 'Running' : 'Stopped';
-      badge.className = `status-badge ${running ? 'running' : 'stopped'}`;
-      document.getElementById('btnStart').disabled = running;
-      document.getElementById('btnStop').disabled = !running;
-      document.getElementById('btnRestart').disabled = !running;
-      document.getElementById('btnReconnect').disabled = running;
-    }
-
-    function updateBotInfo(cfg) {
-      document.getElementById('botUsername').textContent = cfg.username || '-';
-      document.getElementById('botServer').textContent = `${cfg.host}:${cfg.port}`;
-      document.getElementById('botVersion').textContent = cfg.version || '-';
-    }
-
-    function fillConfigForm(cfg) {
-      document.getElementById('cfgHost').value = cfg.host || '';
-      document.getElementById('cfgPort').value = cfg.port || '';
-      document.getElementById('cfgVersion').value = cfg.version || '';
-      document.getElementById('cfgUsername').value = cfg.username || '';
-      document.getElementById('cfgPassword').value = '';
-      document.getElementById('cfgAuth').value = cfg.auth || 'offline';
-      document.getElementById('cfgAutoReconnect').checked = cfg.autoReconnect !== false;
-      document.getElementById('cfgAntiAfk').checked = cfg.antiAfk !== false;
-    }
-
-    function sendCmd(action) {
-      fetch(`/api/${action}`, { method: 'POST' })
-        .then(r => r.json())
-        .then(d => { if (!d.success) addLog({ type: 'error', message: d.msg, time: new Date().toISOString() }); });
-    }
-
-    function sendCommand() {
-      const input = document.getElementById('cmdInput');
-      const cmd = input.value.trim();
-      if (!cmd) return;
-      fetch('/api/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: cmd }) })
-        .then(r => r.json())
-        .then(d => { if (d.success) input.value = ''; });
-    }
-
-    function clearConsole() { consoleEl.innerHTML = ''; }
-
-    function showTab(tab) {
-      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.onclick.toString().includes(`'${tab}'`)));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === `tab-${tab}`));
-      if (tab === 'processes') loadProcesses();
-      if (tab === 'system') loadSystem();
-    }
-
-    async function loadProcesses() {
-      try {
-        const res = await fetch('/api/processes');
-        const processes = await res.json();
-        const container = document.getElementById('processList');
-        container.innerHTML = processes.map(p => `
-          <div class="process-item">
-            <span class="process-pid">${p.pid}</span>
-            <span class="process-name" title="${escapeHtml(p.cmd || p.name)}">${escapeHtml(p.name || p.cmd || 'unknown')}</span>
-            <span class="process-cpu">${p.cpu || 0}%</span>
-            <span class="process-mem">${formatBytes(p.mem)}</span>
-            <div class="process-actions">
-              <button class="btn btn-danger btn-sm" onclick="killProcess(${p.pid})">Kill</button>
+        <div id="botWorkspace" style="display: none; flex: 1; flex-direction: column; overflow: hidden;">
+            <div class="main-header">
+                <div class="bot-title" id="currentBotTitle">Имя бота</div>
+                <div class="controls">
+                    <button class="btn-start" onclick="controlBot('start')">Запустить</button>
+                    <button class="btn-restart" onclick="controlBot('restart')">Перезапустить</button>
+                    <button class="btn-stop" onclick="controlBot('stop')">Остановить</button>
+                </div>
             </div>
-          </div>
-        `).join('');
-      } catch (e) {
-        document.getElementById('processList').innerHTML = '<div class="process-item"><span>Error loading</span></div>';
-      }
-    }
 
-    async function killProcess(pid) {
-      if (!confirm(`Kill process ${pid}?`)) return;
-      const res = await fetch('/api/kill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid }) });
-      const data = await res.json();
-      if (data.success) loadProcesses();
-      else alert('Failed: ' + data.msg);
-    }
+            <div class="logs-container">
+                <div class="logs-header">
+                    <span>Логи работы</span>
+                    <label class="auto-scroll-label">
+                        <input type="checkbox" id="autoScroll" checked> Автопрокрутка
+                    </label>
+                </div>
+                <div class="logs-output" id="logsOutput"></div>
+            </div>
+        </div>
+    </main>
 
-    async function loadSystem() {
-      try {
-        const res = await fetch('/api/system');
-        const data = await res.json();
-        document.getElementById('sysPlatform').textContent = data.platform;
-        document.getElementById('sysNode').textContent = data.node;
-        document.getElementById('sysCpus').textContent = data.cpus;
-        document.getElementById('sysMemTotal').textContent = formatBytes(data.memTotal);
-        document.getElementById('sysMemFree').textContent = formatBytes(data.memFree);
-        document.getElementById('sysHostname').textContent = data.hostname;
-        document.getElementById('sysUptime').textContent = formatUptime(data.uptime);
-        document.getElementById('sysLoad').textContent = data.load.join(', ');
-      } catch (e) {}
-    }
+    <script>
+        let bots = [];
+        let currentBotId = null;
+        let logsCache = {}; // Хранение логов для каждого бота
 
-    async function saveConfig(e) {
-      e.preventDefault();
-      const config = {
-        host: document.getElementById('cfgHost').value,
-        port: parseInt(document.getElementById('cfgPort').value),
-        version: document.getElementById('cfgVersion').value,
-        username: document.getElementById('cfgUsername').value,
-        auth: document.getElementById('cfgAuth').value,
-        autoReconnect: document.getElementById('cfgAutoReconnect').checked,
-        antiAfk: document.getElementById('cfgAntiAfk').checked
-      };
-      const pwd = document.getElementById('cfgPassword').value;
-      if (pwd) config.password = pwd;
-      const res = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) });
-      const data = await res.json();
-      if (data.success) {
-        addLog({ type: 'system', message: 'Config saved', time: new Date().toISOString() });
-        document.getElementById('cfgPassword').value = '';
-      }
-    }
+        // Исправление для WebSocket (поддержка WSS на Render / HTTPS и WS для локалки)
+        const protocol = location.protocol === 'https:' ? 'wss://' : 'ws://';
+        const ws = new WebSocket(`${protocol}${location.host}`);
 
-    function formatBytes(bytes) { if (!bytes) return '-'; const units = ['B','KB','MB','GB']; let i = 0; while (bytes >= 1024 && i < 3) { bytes /= 1024; i++; } return bytes.toFixed(1) + ' ' + units[i]; }
-    function formatUptime(sec) { if (!sec) return '-'; const h = Math.floor(sec/3600); const m = Math.floor((sec%3600)/60); const s = Math.floor(sec%60); return `${h}h ${m}m ${s}s`; }
+        ws.onopen = () => {
+            console.log('WebSocket соединен');
+            fetchBots();
+        };
 
-    consoleEl.addEventListener('scroll', () => { autoScroll = consoleEl.scrollTop + consoleEl.clientHeight >= consoleEl.scrollHeight - 50; });
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'log') {
+                    if (!logsCache[data.botId]) logsCache[data.botId] = '';
+                    logsCache[data.botId] += data.message + '\n';
+                    
+                    if (currentBotId === data.botId) {
+                        renderLogs();
+                    }
+                } else if (data.type === 'status_update') {
+                    updateBotStatusInList(data.botId, data.status);
+                }
+            } catch (e) {
+                console.error('Ошибка обработки сообщения WS:', e);
+            }
+        };
 
-    setInterval(() => {
-      fetch('/api/status').then(r => r.json()).then(d => {
-        if (d.running) document.getElementById('botPid').textContent = d.pid || '-';
-      });
-      loadSystem();
-    }, 5000);
+        async function fetchBots() {
+            try {
+                const response = await fetch('/api/processes');
+                bots = await response.json();
+                renderBotsList();
+                
+                // Если боты есть, а текущий не выбран — выберем первого
+                if (bots.length > 0 && !currentBotId) {
+                    selectBot(bots[0].id);
+                }
+            } catch (e) {
+                console.error('Не удалось загрузить список ботов', e);
+            }
+        }
 
-    loadSystem();
-  </script>
+        function renderBotsList() {
+            const listEl = document.getElementById('botsList');
+            listEl.innerHTML = '';
+
+            bots.forEach(bot => {
+                const item = document.createElement('div');
+                item.className = `bot-item ${bot.id === currentBotId ? 'active' : ''}`;
+                item.onclick = () => selectBot(bot.id);
+
+                const isOnline = bot.status === 'online' || bot.status === 'running';
+
+                item.innerHTML = `
+                    <div class="bot-info">
+                        <span class="bot-name">${escapeHtml(bot.name || bot.id)}</span>
+                        <span style="font-size: 0.75rem; color: var(--text-muted);">${bot.status || 'offline'}</span>
+                    </div>
+                    <span class="bot-status-dot ${isOnline ? 'status-online' : 'status-offline'}"></span>
+                `;
+                listEl.appendChild(item);
+            });
+        }
+
+        function selectBot(id) {
+            currentBotId = id;
+            const bot = bots.find(b => b.id === id);
+
+            document.getElementById('noBotSelected').style.display = 'none';
+            document.getElementById('botWorkspace').style.display = 'flex';
+            
+            if (bot) {
+                document.getElementById('currentBotTitle').innerText = bot.name || bot.id;
+            }
+
+            renderBotsList();
+            renderLogs();
+        }
+
+        function renderLogs() {
+            const output = document.getElementById('logsOutput');
+            output.innerText = logsCache[currentBotId] || 'Логи пока отсутствуют...\n';
+
+            const autoScroll = document.getElementById('autoScroll').checked;
+            if (autoScroll) {
+                output.scrollTop = output.scrollHeight;
+            }
+        }
+
+        function updateBotStatusInList(botId, status) {
+            const bot = bots.find(b => b.id === botId);
+            if (bot) {
+                bot.status = status;
+                renderBotsList();
+            }
+        }
+
+        async function controlBot(action) {
+            if (!currentBotId) return;
+            try {
+                const response = await fetch(`/api/bots/${currentBotId}/${action}`, {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    alert(result.error || 'Ошибка при выполнении действия');
+                }
+            } catch (e) {
+                console.error('Ошибка запроса управления:', e);
+            }
+        }
+
+        function openAddBotModal() {
+            const botName = prompt('Введите название нового бота или путь к нему:');
+            if (!botName) return;
+
+            fetch('/api/bots', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: botName })
+            })
+            .then(res => res.json())
+            .then(data => {
+                fetchBots();
+            })
+            .catch(err => console.error('Ошибка добавления бота:', err));
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+    </script>
 </body>
 </html>
